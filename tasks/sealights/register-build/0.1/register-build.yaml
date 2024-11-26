@@ -1,0 +1,55 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: register-build
+spec:
+  params:
+    - name: image-url
+      type: string
+      description: Image with sealights binaries to use.
+    - name: git-revision
+      type: string
+      description: The Git revision (commit SHA) from which the test pipeline is originating.
+      default: "main"
+  volumes:
+    - name: konflux-sealights
+      secret:
+        secretName: sealights-secret
+  steps:
+    - name: run-slcli
+      image: $(params.image-url)
+      env:
+        - name: COMMIT_SHA
+          value: $(params.git-revision)
+      volumeMounts:
+        - name: konflux-sealights
+          mountPath: /usr/local/konflux-sealights
+      script: |
+        #!/bin/sh
+        export BUILD_ID="${COMMIT_SHA}_$(date +'%y%m%d.%H%M')"
+
+        dnf -y --setopt=tsflags=nodocs install \
+          golang \
+          make \
+          git \
+          && dnf clean all
+
+        SLGO_AGENT_URL="https://agents.sealights.co/slgoagent/latest/slgoagent-linux-amd64.tar.gz"
+        SLCLI_URL="https://agents.sealights.co/slcli/latest/slcli-linux-amd64.tar.gz"
+
+        echo "[INFO] Downloading and extracting Sealights GO Agent..."
+        curl -sSL "$SLGO_AGENT_URL" | tar -xz -C /tmp/
+
+        echo "[INFO] Downloading and extracting Sealights CLI..."
+        curl -sSL "$SLCLI_URL" | tar -xz -C /tmp/
+
+        cd $(mktemp -d)
+        export BUILD_ID="${COMMIT_SHA}_$(date +'%y%m%d.%H%M')"
+
+        git clone -b main https://github.com/flacatus/release-service.git .
+
+        slcli config init --lang go --token /usr/local/konflux-sealights/token
+        slcli config create-bsid --app release-service-fla --branch main --build ${BUILD_ID}
+        slcli scan --bsid buildSessionId.txt --path-to-scanner /usr/local/bin/slgoagent --workspacepath . --scm git
+
+        make test

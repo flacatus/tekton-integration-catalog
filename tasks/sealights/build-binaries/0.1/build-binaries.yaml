@@ -1,0 +1,78 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: build-sealights-binaries
+spec:
+  description: |
+    This task takes an existing container image and injects Sealights binaries into it.
+    The resulting image is tagged and pushed to the specified container registry.
+  results:
+    - name: output-image
+      description: Container image that contains sealights binaries.
+  params:
+    - name: image-url
+      type: string
+      description: The base container image to modify and push (e.g., quay.io/example/image).
+    - name: git-revision
+      type: string
+      description: The Git revision (commit SHA) from which the test pipeline is originating.
+      default: "main"
+    - name: storage-driver
+      type: string
+      description: The storage driver to configure for Buildah (e.g., vfs or overlay).
+      default: vfs
+  volumes:
+    - name: varlibcontainers
+      emptyDir: {}
+    - name: tmpfiles
+      emptyDir: {}
+  steps:
+    - name: inject-sealights-binaries
+      image: registry.access.redhat.com/ubi9/buildah@sha256:c62b2318eb4709c216ad25969abae5ff6b56e9879d266b539a46fdfc99e8361e
+      env:
+        - name: IMAGE_URL
+          value: $(params.image-url)
+        - name: STORAGE_DRIVER
+          value: $(params.storage-driver)
+        - name: COMMIT_SHA
+          value: $(params.git-revision)
+      script: |
+        #!/bin/bash
+        set -euo pipefail
+
+        # URLs for the Sealights binaries
+        SLGO_AGENT_URL="https://agents.sealights.co/slgoagent/latest/slgoagent-linux-amd64.tar.gz"
+        SLCLI_URL="https://agents.sealights.co/slcli/latest/slcli-linux-amd64.tar.gz"
+
+        BASE_IMAGE_URL="${IMAGE_URL%@*}"
+        NEW_TAG="${BASE_IMAGE_URL}:${COMMIT_SHA}-sealights"
+
+        echo "[INFO] Downloading and extracting Sealights GO Agent..."
+        curl -sSL "$SLGO_AGENT_URL" | tar -xz -C /tmp/
+
+        echo "[INFO] Downloading and extracting Sealights CLI..."
+        curl -sSL "$SLCLI_URL" | tar -xz -C /tmp/
+
+        echo "[INFO] Initializing Buildah to modify the container image: $BASE_IMAGE_URL"
+        container=$(buildah from "$IMAGE_URL")
+
+        echo "[INFO] Copying Sealights binaries into the container..."
+        buildah copy "$container" /tmp/slgoagent /usr/local/bin/slgoagent
+        buildah copy "$container" /tmp/slcli /usr/local/bin/slcli
+
+        echo "[INFO] Committing changes to create a new image: $NEW_TAG"
+        buildah commit "$container" "$NEW_TAG"
+
+        echo "[INFO] Pushing the modified image to the registry: $NEW_TAG"
+        buildah push --tls-verify=true --retry=5 "$NEW_TAG" "docker://$NEW_TAG"
+
+        echo -n "$NEW_TAG" | tee $(results.output-image.path)
+      securityContext:
+        capabilities:
+          add:
+            - SETFCAP
+      volumeMounts:
+        - mountPath: /var/lib/containers
+          name: varlibcontainers
+        - mountPath: /tmp
+          name: tmpfiles

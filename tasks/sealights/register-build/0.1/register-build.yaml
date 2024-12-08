@@ -47,7 +47,8 @@ spec:
           make \
           git \
           && dnf clean all
-
+        go install github.com/onsi/ginkgo/v2/ginkgo@latest
+        
         SLGO_AGENT_URL="https://agents.sealights.co/slgoagent/latest/slgoagent-linux-amd64.tar.gz"
         SLCLI_URL="https://agents.sealights.co/slcli/latest/slcli-linux-amd64.tar.gz"
 
@@ -70,5 +71,4 @@ spec:
         cat buildSessionId.txt > $(results.sealights-session-id.path)
         echo -n "$BUILD_ID" > $(results.build-id.path)
                       
-        go install github.com/onsi/ginkgo/v2/ginkgo@latest
         ginkgo --junit-report "$ARTIFACT_DIR"/junit_sample.xml

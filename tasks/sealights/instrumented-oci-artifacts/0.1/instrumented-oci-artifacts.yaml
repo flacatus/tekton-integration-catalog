@@ -1,0 +1,33 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: instrumented-oci-artifacts
+spec:
+  description: |
+    The `instrumented-oci-artifacts` Task is responsible for generating the image:tag to build a new image for sealights.
+    Also this task provide a new image:tag to store trusted artifacts for the sealights builds.
+  results:
+    - name: image
+      description: Sealights Session Id.
+    - name: oci-image
+      description: The build id generated for sealights
+  params:
+    - name: image-url
+      type: string
+      description: >-
+        The URL of the base container image to be modified and pushed 
+        (e.g., quay.io/redhat-user-workloads:sha@xyz). This image is also included in the Konflux
+        snapshot.
+    - name: revision
+      type: string
+      description: "The Git revision (commit SHA) of the source code being tested."
+  steps:
+    - name: sealights-code-scan
+      image: registry.access.redhat.com/ubi9/ubi:latest
+      env:
+        - name: COMMIT_SHA
+          value: $(params.git-revision)
+      script: |
+        BASE_IMAGE_URL="${IMAGE_URL%@*}"
+        echo -n "${BASE_IMAGE_URL}:${COMMIT_SHA}-sealights" > $(tasks.results.image.path)
+        echo -n "${BASE_IMAGE_URL}:${REVISION}-oci-sealights" > $(tasks.results.oci-image.path)

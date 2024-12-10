@@ -1,0 +1,39 @@
+apiVersion: tekton.dev/v1alpha1
+kind: StepAction
+metadata:
+  name: get-sealights-image
+spec:
+  description: >-
+    Generates a container image for Sealights instrumentation by modifying a
+    base build image and tagging it accordingly.
+  results:
+    - name: sealights-image
+      type: string
+      description: >-
+        The name of the container image generated for Sealights instrumentation,
+        derived from the base build image.
+  params:
+    - name: image-url
+      type: string
+      description: >-
+        The URL of the base container image to be modified and pushed 
+        (e.g., quay.io/example/image:sha@xyz). In Konflux, this Sealights image
+        is typically created from the build image tagged with the associated SHA.
+    - name: revision
+      type: string
+      description: >-
+        The Git revision (commit SHA) of the source code being tested.
+        This revision is used to tag the new Sealights image in the format:
+        `${revision}-sealights`.
+  env:
+    - name: IMAGE_URL
+      value: $(params.image-url)
+    - name: REVISION
+      value: $(params.revision)
+  image: registry.access.redhat.com/ubi9@sha256:1057dab827c782abcfb9bda0c3900c0966b5066e671d54976a7bcb3a2d1a5e53
+  script: |
+    #!/bin/sh
+    set -euo pipefail
+
+    BASE_IMAGE_URL="${IMAGE_URL%@*}"
+    echo -n "${BASE_IMAGE_URL}:${REVISION}-sealights" > $(step.results.sealights-image.path)

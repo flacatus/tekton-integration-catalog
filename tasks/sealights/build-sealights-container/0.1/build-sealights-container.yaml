@@ -10,20 +10,14 @@ spec:
     - name: output-image
       description: The resulting container image containing Sealights binaries.
   params:
-    - name: git-url
-      description: The URL of the Git repository to clone.
+    - name: source-artifact
+      description: The Trusted Artifact URI pointing to the artifact with
+        the application source code.
       type: string
-    - name: git-revision
+    - name: revision
       description: The Git commit SHA for checkout.
       type: string
       default: "main"
-    - name: git-branch
-      description: The Git branch to build from.
-      type: string
-      default: "main"
-    - name: konflux-component
-      description: The Konflux component name used in the build process, linked to Sealights.
-      type: string
     - name: storage-driver
       description: The Buildah storage driver to use (e.g., vfs or overlay).
       type: string
@@ -43,41 +37,22 @@ spec:
   volumes:
     - name: varlibcontainers
       emptyDir: {}
-    - name: sourcecode
+    - name: workdir
       emptyDir: {}
-    - name: sealights-credentials
-      secret:
-        secretName: sealights-credentials
+  stepTemplate:
+    volumeMounts:
+      - name: workdir
+        mountPath: /var/workdir
+      - name: varlibcontainers
+        mountPath: /var/lib/containers
   steps:
-    - name: clone-source-code
-      image: quay.io/konflux-ci/git-clone@sha256:4e53ebd9242f05ca55bfc8d58b3363d8b9d9bc3ab439d9ab76cdbdf5b1fd42d9
-      volumeMounts:
-        - name: sourcecode
-          mountPath: /source-code
-      env:
-        - name: GIT_URL
-          value: $(params.git-url)
-        - name: GIT_REVISION
-          value: $(params.git-revision)
-        - name: CHECKOUT_DIR
-          value: /source-code
-      script: |
-        #!/bin/bash
-        set -euo pipefail
-        /ko-app/git-init \
-          -url="${GIT_URL}" \
-          -revision="${GIT_REVISION}" \
-          -path="${CHECKOUT_DIR}"
-
+    - name: use-trusted-artifact
+      image: quay.io/redhat-appstudio/build-trusted-artifacts:latest@sha256:52f1391e6f1c472fd10bb838f64fae2ed3320c636f536014978a5ddbdfc6b3af
+      args:
+        - use
+        - $(params.source-artifact)=/var/workdir/source
     - name: build-sealights-image
       image: registry.access.redhat.com/ubi9/buildah@sha256:c62b2318eb4709c216ad25969abae5ff6b56e9879d266b539a46fdfc99e8361e
-      volumeMounts:
-        - name: varlibcontainers
-          mountPath: /var/lib/containers
-        - name: sourcecode
-          mountPath: /source-code
-        - name: sealights-credentials
-          mountPath: /usr/local/sealights-credentials
       securityContext:
         capabilities:
           add:
@@ -86,11 +61,7 @@ spec:
         - name: STORAGE_DRIVER
           value: $(params.storage-driver)
         - name: COMMIT_SHA
-          value: $(params.git-revision)
-        - name: BRANCH
-          value: $(params.git-branch)
-        - name: KONFLUX_COMPONENT
-          value: $(params.konflux-component)
+          value: $(params.revision)
         - name: DOCKERFILE
           value: $(params.dockerfile)
         - name: CONTEXT
@@ -98,7 +69,7 @@ spec:
         - name: IMAGE
           value: $(params.image)
         - name: SOURCE_CODE_DIR
-          value: "/source-code"
+          value: "/var/workdir/source"
       script: |
         #!/bin/bash
         set -euo pipefail
@@ -114,31 +85,18 @@ spec:
           exit 1
         fi
 
-        # Retrieve the Sealights token
-        SEALIGHTS_TOKEN=$(cat /usr/local/sealights-credentials/token)
-
-        # Define build arguments for Buildah
-        BUILDAH_ARGS=(
-          "--build-arg=SERVICE_NAME=${KONFLUX_COMPONENT}"
-          "--build-arg=BRANCH_NAME=${BRANCH}"
-          "--build-arg=BUILD_NAME=${COMMIT_SHA}_$(date +'%y%m%d.%H%M')"
-          "--build-arg=SEALIGHTS_TOKEN=${SEALIGHTS_TOKEN}"
-        )
-
-        # Set the image tags
-        BASE_IMAGE_URL="${IMAGE%@*}"
-        SEALIGHTS_IMAGE="${BASE_IMAGE_URL}:${COMMIT_SHA}-sealights"
-
         # Build the image with Buildah
         buildah build \
-          "${BUILDAH_ARGS[@]}" \
           --ulimit nofile=4096:4096 \
-          -f "$dockerfile_path" -t "${SEALIGHTS_IMAGE}" "$SOURCE_CODE_DIR/$CONTEXT"
+          -f "$dockerfile_path" -t "${IMAGE}" "$SOURCE_CODE_DIR/$CONTEXT"
 
         # Push the image to the container registry
         buildah push \
           --tls-verify=true \
-          --retry=5 "$SEALIGHTS_IMAGE"
+          --retry=5 "$IMAGE"
 
         # Output the resulting image reference
-        echo -n "$SEALIGHTS_IMAGE" > $(results.output-image.path)
+        DIGEST_IMAGE=$(buildah images --format '{{ .Name }}:{{ .Tag }}@{{ .Digest }}' --filter reference="$IMAGE")
+
+        # Output the resulting image reference and digest
+        echo "$IMAGE" > $(results.output-image.path)

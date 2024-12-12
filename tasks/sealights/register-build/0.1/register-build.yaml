@@ -1,31 +1,70 @@
 apiVersion: tekton.dev/v1beta1
 kind: Task
 metadata:
-  name: register-build
+  name: sealights-go-instrumentation
 spec:
   results:
-    - name: sealights-session-id
-      description: Sealights Session Id.
-    - name: build-id
-      description: The build id generated for sealights
+    - name: build-session-id
+      type: string
+      description: "A unique identifier generated for the current sealights build session."
+    - name: build-name
+      type: string
+      description: "A unique build name generated using the commit SHA and current date to prevent conflicts during test reruns."
   params:
-    - name: git-revision
+    - name: source-artifact
+      description: The Trusted Artifact URI pointing to the artifact with
+        the application source code.
       type: string
-      description: The Git revision (commit SHA) from which the test pipeline is originating.
-      default: "main"
-    - name: source-repo
+    - name: go-version
       type: string
-      description: The Git URL from which the test pipeline is originating. This can be from a fork or the original repository.
+      description: "The Go version to use with the 'ubi8/go-toolset' image, in the format '1.x.y' (e.g., '1.21.3')."
+    - name: sealights-secret
+      type: string
+      description: "The name of the Openshift secret containing Sealights credentials."
+    - name: component
+      type: string
+      description: "The name of the Konflux component associated with the integration tests."
+    - name: scm-provider
+      type: string
+      default: "github"
+      description: "The source control management (SCM) provider used for the project, such as 'github', 'gitlab'."
+    - name: repository-url
+      type: string
+      description: "The name or URL of the source code repository (e.g., 'github.com/org/repo')."
       default: ""
-    - name: source-branch
+    - name: branch
       type: string
-      description: The branch from the fork or upstream repo where the pipeline is executed.
+      description: "The name of the Git branch to use for the operation (e.g., 'main' or 'feature-branch')."
+      default: "main"
+    - name: revision
+      type: string
+      description: "The Git revision (commit SHA) from which the test pipeline is originating."
+    - name: pull-request-number
+      type: string
+      description: "The identifier number of the pull request/merge request."
+      default: ""
+    - name: target-branch
+      type: string
+      description: "The name of the target branch for the pull request, typically the branch into which the changes will be merged (e.g., 'main', 'develop')."
       default: "main"
   volumes:
-    - name: konflux-sealights
+    - name: sealights-credentials
       secret:
-        secretName: sealights-secret
+        secretName: sealights-credentials
+    - name: workdir
+      emptyDir: {}
+  stepTemplate:
+    volumeMounts:
+      - mountPath: /var/workdir
+        name: workdir
+      - name: konflux-sealights
+        mountPath: /usr/local/konflux-sealights
   steps:
+    - name: use-trusted-artifact
+      image: quay.io/redhat-appstudio/build-trusted-artifacts:latest@sha256:52f1391e6f1c472fd10bb838f64fae2ed3320c636f536014978a5ddbdfc6b3af
+      args:
+        - use
+        - $(params.source-artifact)=/var/workdir/source
     - name: sealights-code-scan
       image: registry.access.redhat.com/ubi9/ubi:latest
       env:
@@ -35,40 +74,7 @@ spec:
           value: $(params.source-repo)
         - name: SOURCE_BRANCH
           value: $(params.source-branch)
-      volumeMounts:
-        - name: konflux-sealights
-          mountPath: /usr/local/konflux-sealights
       script: |
         #!/bin/sh
-        export BUILD_ID="${COMMIT_SHA}_$(date +'%y%m%d.%H%M')"
 
-        dnf -y --setopt=tsflags=nodocs install \
-          golang \
-          make \
-          git \
-          && dnf clean all
-        go install github.com/onsi/ginkgo/v2/ginkgo@latest
-        
-        SLGO_AGENT_URL="https://agents.sealights.co/slgoagent/latest/slgoagent-linux-amd64.tar.gz"
-        SLCLI_URL="https://agents.sealights.co/slcli/latest/slcli-linux-amd64.tar.gz"
-
-        echo "[INFO] Downloading and extracting Sealights GO Agent..."
-        curl -sSL "$SLGO_AGENT_URL" | tar -xz -C /usr/local/bin/
-
-        echo "[INFO] Downloading and extracting Sealights CLI..."
-        curl -sSL "$SLCLI_URL" | tar -xz -C /usr/local/bin/
-
-        cd $(mktemp -d)
-        export BUILD_ID="${COMMIT_SHA}_$(date +'%y%m%d.%H%M')"
-
-        git clone -b ${SOURCE_BRANCH} ${SOURCE_REPO} .
-        go mod tidy && go mod vendor
-
-        slcli config init --lang go --token /usr/local/konflux-sealights/token
-        slcli config create-bsid --app k8s-namespace-creator --branch ${SOURCE_BRANCH} --build ${BUILD_ID}
-        slcli scan --bsid buildSessionId.txt --path-to-scanner /usr/local/bin/slgoagent --workspacepath . --scm git
-
-        cat buildSessionId.txt > $(results.sealights-session-id.path)
-        echo -n "$BUILD_ID" > $(results.build-id.path)
-                      
-        ginkgo --junit-report "$ARTIFACT_DIR"/junit_sample.xml
+        ls -larth /var/workdir/source

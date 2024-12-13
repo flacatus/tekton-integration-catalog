@@ -32,6 +32,10 @@ spec:
       type: string
       default: "github"
       description: "The source control management (SCM) provider used for the project, such as 'github', 'gitlab'."
+    - name: packages-excluded
+      type: array
+      default: []
+      description: "Declares packages that will not be scanned by sealights instrumentation."
     - name: repository-url
       type: string
       description: "The name or URL of the source code repository (e.g., 'github.com/org/repo')."
@@ -43,6 +47,10 @@ spec:
     - name: revision
       type: string
       description: "The Git revision (commit SHA) from which the test pipeline is originating."
+    - name: test-event
+      type: string
+      description: "Indicates if the job is triggered by a Pull Request or a Push event."
+      default: ""
     - name: pull-request-number
       type: string
       description: "The identifier number of the pull request/merge request."
@@ -92,36 +100,38 @@ spec:
           value: $(params.pull-request-number)
         - name: TARGET_BRANCH
           value: $(params.target-branch)
+        - name: TEST_EVENT
+          value: $(params.test-event)
+      args: ["$(params.packages-excluded[*])"] 
       script: |
         #!/bin/sh
         set -euo pipefail
 
-        export SEALIGHTS_TOKEN BUILD_NAME BSID
+        export SEALIGHTS_TOKEN BUILD_NAME BSID EXCLUDE_PACKAGES_ENUM
 
         SEALIGHTS_TOKEN="$(cat /usr/local/sealights-credentials/token)"
         BUILD_NAME="${REVISION}_$(date +'%y%m%d.%H%M')"
+        EXCLUDE_PACKAGES_ENUM="$(IFS=,; echo "$(printf "%s," $@ | sed 's/,$//')")"
 
         wget -qO- https://agents.sealights.co/slgoagent/latest/slgoagent-linux-amd64.tar.gz | tar -xzv -C /usr/local/bin
         wget -qO- https://agents.sealights.co/slcli/latest/slcli-linux-amd64.tar.gz | tar -xzv -C /usr/local/bin
 
         slcli config init --lang go --token "${SEALIGHTS_TOKEN}"
 
-        if [[ -n "${PULL_REQUEST_NUMBER}" && "${PULL_REQUEST_NUMBER}" != "" ]]; then
+        if [[ -n "${TEST_EVENT}" && "${TEST_EVENT}" == "pull_request" ]]; then
           echo "[INFO] Generate build session id from a Pull Request source code"
 
-          slcli config create-pr-bsid --app "${COMPONENT}" --target-branch "${TARGET_BRANCH}" --pull-request-number "${PULL_REQUEST_NUMBER}" \
-              --latest-commit "${REVISION}" --repository-url "${REPOSITORY_URL}"
+          slcli config create-pr-bsid --app "${COMPONENT}" --target-branch "${TARGET_BRANCH}" --pull-request-number \
+            "${PULL_REQUEST_NUMBER}" --latest-commit "${REVISION}" --repository-url "${REPOSITORY_URL}"
         else
           echo "[INFO] Creating build session ID (BSID) for app: ${COMPONENT}, branch: ${BRANCH}, build: ${BUILD_NAME}..."
           slcli config create-bsid --app "${COMPONENT}" --branch "${BRANCH}" --build "${BUILD_NAME}"
         fi
 
-        slcli scan --bsid buildSessionId.txt --path-to-scanner /usr/local/bin/slgoagent \
+        slcli scan --packages-excluded "${EXCLUDE_PACKAGES_ENUM}" --bsid buildSessionId.txt --path-to-scanner /usr/local/bin/slgoagent \
           --workspacepath ./ --scm git --scmProvider "${SCM_PROVIDER}"
 
-        BSID="$(cat buildSessionId.txt)"
-
-        echo -n "$BSID" > $(results.build-session-id.path)
+        echo -n "$(cat buildSessionId.txt)" > $(results.build-session-id.path)
         echo -n "$BUILD_NAME" > $(results.build-name.path)
 
         # Temporary solution. Remove tokens to not build them

@@ -35,7 +35,7 @@ spec:
     - name: packages-excluded
       type: array
       default: []
-      description: "Declares packages that will not be scanned by sealights instrumentation."
+      description: "A list of Go packages to exclude from Sealights instrumentation during the code scan. Specify package paths to prevent them from being analyzed (e.g., 'pkg1', 'github.com/modern-go/concurrent')."
     - name: repository-url
       type: string
       description: "The name or URL of the source code repository (e.g., 'github.com/org/repo')."
@@ -80,7 +80,7 @@ spec:
       args:
         - use
         - $(params.source-artifact)=/var/workdir/source
-    - name: sealights-code-scan
+    - name: sealights-go-instrumentation
       image: registry.access.redhat.com/ubi8/go-toolset:$(params.go-version)
       workingDir: /var/workdir/source
       securityContext:

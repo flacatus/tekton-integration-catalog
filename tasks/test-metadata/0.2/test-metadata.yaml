@@ -67,10 +67,9 @@ spec:
         GIT_REVISION=$(jq -r --arg component_name "$KONFLUX_COMPONENT_NAME" '.components[] | select(.name == $component_name) | .source.git.revision' <<< "$SNAPSHOT")
         SOURCE_REPO_ORG=$(echo "$SOURCE_REPO_URL" | sed -E 's#https://github.com/([^/]+)/.*#\1#')
 
-        PR_AUTHOR="$(curl -s https://api.github.com/repos/${GIT_ORGANIZATION}/${GIT_REPOSITORY}/pulls/${PULL_REQUEST_NUMBER} | jq -r .user.login)"
+        PR_AUTHOR="$(curl -s https://api.github.com/repos/${GIT_ORGANIZATION}/${GIT_REPOSITORY}/pulls/${PULL_REQUEST_NUMBER} | jq -r '.user.login // ""')"
 
         COMPONENT_CONTAINER_IMAGE=$(jq -r --arg component_name "$KONFLUX_COMPONENT_NAME" '.components[] | select(.name == $component_name) | .containerImage' <<< "$SNAPSHOT")
-
 
         # In case is coming from /retest event then it's a pull_request
         # if event type is not push and pull_request_number is not empty then is a pull_request
@@ -84,7 +83,7 @@ spec:
             "konflux_component": "$KONFLUX_COMPONENT_NAME",
             "snapshot": $SNAPSHOT,
             "git": {
-                "pull_request_number": $PULL_REQUEST_NUMBER,
+                "pull_request_number": ${PULL_REQUEST_NUMBER:-0},
                 "pull_request_author": "$PR_AUTHOR",
                 "org": "$GIT_ORGANIZATION",
                 "repo": "$GIT_REPOSITORY",

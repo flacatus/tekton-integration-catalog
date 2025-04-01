@@ -2,7 +2,7 @@ FROM registry.redhat.io/ubi9/go-toolset:latest
 
 LABEL konflux.additional-tags="latest"
 
-ENV AGENT_VERSION=1.1.187
+ENV AGENT_VERSION=1.1.192
 ENV CLI_VERSION=1.0.46
 
 USER root

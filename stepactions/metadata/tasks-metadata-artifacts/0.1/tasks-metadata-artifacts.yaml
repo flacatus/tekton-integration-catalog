@@ -1,0 +1,57 @@
+apiVersion: tekton.dev/v1alpha1
+kind: StepAction
+metadata:
+  name: create-tasks-status-metadata
+  labels:
+    app.kubernetes.io/version: "0.1"
+  annotations:
+    tekton.dev/pipelines.minVersion: 0.12.1
+    tekton.dev/tags: konflux
+spec:
+  description: |
+    WIP
+  image: quay.io/konflux-ci/tekton-integration-catalog/utils:latest
+  params:
+    - name: sealights-domain
+      default: "redhat.sealights.co"
+      type: string
+      description: "The domain name of the Sealights server."
+    - name: task-statuses
+      type: array
+      description: "WIP"
+  env:
+    - name: KONFLUX_COMPONENT_NAME
+      valueFrom:
+        fieldRef:
+          fieldPath: metadata.labels['appstudio.openshift.io/component']
+    - name: GIT_ORGANIZATION
+      valueFrom:
+        fieldRef:
+          fieldPath: metadata.labels['pac.test.appstudio.openshift.io/url-org']
+    - name: GIT_REPOSITORY
+      valueFrom:
+        fieldRef:
+          fieldPath: metadata.labels['pac.test.appstudio.openshift.io/url-repository']
+  script: |
+    #!/bin/bash
+    set -euo pipefail
+
+    echo "Building JSON from task statuses using jq..."
+    JSON_ARRAY="[]"
+
+    for entry in "$@"; do
+      TASK_NAME=$(echo "$entry" | cut -d':' -f1)
+      STATUS=$(echo "$entry" | cut -d':' -f2)
+
+      JSON_ARRAY=$(echo "$JSON_ARRAY" | jq --arg name "$TASK_NAME" --arg status "$STATUS" \
+        '. += [{taskName: $name, status: $status}]')
+    done
+
+    FINAL_JSON=$(echo "$JSON_ARRAY" | jq --arg prun "$(params.pipelinerun_name)" \
+      '{pipelinerunName: $prun, taskStatuses: .}')
+
+    echo "$FINAL_JSON" > task_statuses
+
+    echo "JSON written to ./task_statuses"
+    echo "---"
+    cat task_statuses

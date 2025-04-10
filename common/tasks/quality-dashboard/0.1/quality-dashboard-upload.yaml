@@ -53,6 +53,8 @@ spec:
               fieldPath: metadata.labels['test.appstudio.openshift.io/scenario']
         - name: E2E_REPORT_FILE
           value: $(params.e2e-report-file)
+        - name: TASKS_STATUSES
+          value: $(tasks.status)
       script: |
         #!/bin/bash
 
@@ -60,6 +62,8 @@ spec:
         if [ "$EVENT_TYPE" != "push" ] && [ -n "$PULL_REQUEST_NUMBER" ]; then
           EVENT_TYPE="pull_request"
         fi
+
+        echo -e "Pipeline status: $TASKS_STATUSES"
 
         # Determine the pipeline status based on the pipeline-aggregate-status param
         if [ "$(params.pipeline-aggregate-status)" == "Succeeded" ] || [ "$(params.pipeline-aggregate-status)" == "Completed" ]; then

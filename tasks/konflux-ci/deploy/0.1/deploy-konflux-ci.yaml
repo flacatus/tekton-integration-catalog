@@ -29,6 +29,21 @@ spec:
     - name: create-test-resources
       description: 'Indicates if a set of test resources should be installed'
       default: 'true'
+    - name: component-name
+      description: 'Konflux component which will be deployment using a different image and/or code'
+      default: ''
+    - name: component-image-repository
+      description: 'Image repository to use instead of the one specified in Konflux-CI'
+      default: ''
+    - name: component-image-tag
+      description: 'Image tag to use instead of the one specified in Konflux-CI'
+      default: ''
+    - name: component-pr-owner
+      description: 'Owner of the pull request to use instead of the one specified in Konflux-CI'
+      default: ''
+    - name: component-pr-sha
+      description: 'SHA of the pull request to use instead of the one specified in Konflux-CI'
+      default: ''
 
   volumes:
     - name: workdir
@@ -52,6 +67,47 @@ spec:
         - -url=$(params.repo-url)
         - -revision=$(params.repo-branch)
         - -path=.
+
+    - name: update-kustomization
+      image: quay.io/konflux-ci/tekton-integration-catalog/utils:latest
+      workingDir: /var/workdir
+      script: |
+        #!/bin/bash
+        set -euo pipefail
+        
+        COMPONENT_NAME="$(params.component-name)"
+        IMAGE_REPO="$(params.component-image-repository)"
+        IMAGE_TAG="$(params.component-image-tag)"
+        PR_OWNER="$(params.component-pr-owner)"
+        PR_SHA="$(params.component-pr-sha)"
+  
+        KUSTOMIZATION_PATH="konflux-ci/${COMPONENT_NAME%-service}/core/kustomization.yaml"
+        # Check if the file exists
+        if [[ ! -f "${KUSTOMIZATION_PATH}" ]]; then
+          echo "[WARNING] No substitutions will be applied as the kustomization file for $(params.component-name) has not been found."
+          exit 0
+        fi
+
+        # Apply substitutions
+        if [[ -n "$IMAGE_REPO" ]]; then
+          echo "[INFO] Updating image repository to $IMAGE_REPO"
+          yq -i e "(.images.[] | select(.name==\"quay.io/konflux-ci/${COMPONENT_NAME}\")) |= .newName=\"${IMAGE_REPO}\"" "$KUSTOMIZATION_PATH"
+        fi
+
+        if [[ -n "$IMAGE_TAG" ]]; then
+          echo "[INFO] Updating image tag to $IMAGE_TAG"
+          yq -i e "(.images.[] | select(.name==\"quay.io/konflux-ci/${COMPONENT_NAME}\")) |= .newTag=\"${IMAGE_TAG}\"" "$KUSTOMIZATION_PATH"
+        fi
+
+        if [[ -n "$PR_OWNER" && -n "$PR_SHA" ]]; then
+          echo "[INFO] Updating GitHub reference to $PR_OWNER@$PR_SHA"
+          yq -i e "(.resources[] | select(. ==\"*github.com/konflux-ci/${COMPONENT_NAME}/config/default*\")) |= \"https://github.com/${PR_OWNER}/${COMPONENT_NAME}/config/default?ref=${PR_SHA}\"" "$KUSTOMIZATION_PATH"
+          yq -i e "(.resources[] | select(. ==\"*github.com/konflux-ci/${COMPONENT_NAME}/config/snapshotgc*\")) |= \"https://github.com/${PR_OWNER}/${COMPONENT_NAME}/config/snapshotgc?ref=${PR_SHA}\"" "$KUSTOMIZATION_PATH"
+        fi
+      when:
+        - input: "$(params.component-name)"
+          operator: notin
+          values: [ "" ]
 
     - name: get-kubeconfig
       image: quay.io/konflux-ci/tekton-integration-catalog/utils:latest

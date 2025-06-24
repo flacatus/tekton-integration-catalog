@@ -114,7 +114,8 @@ spec:
 
   steps:
     - name: provisioner
-      image: quay.io/redhat-developer/mapt:v0.9.2
+      image: ghcr.io/redhat-developer/mapt:pr-517-amd64
+      imagePullPolicy: Always
       volumeMounts:
         - name: aws-credentials
           mountPath: /opt/aws-credentials
